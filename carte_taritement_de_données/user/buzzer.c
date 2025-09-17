@@ -1,0 +1,95 @@
+#include "buzzer.h"
+#include "melodies.h"
+#include "stm32l4xx_hal.h"
+
+extern TIM_HandleTypeDef htim8;
+
+#define BUZZER_TIMER       htim8
+#define BUZZER_CHANNEL     TIM_CHANNEL_4
+#define BASE_FREQUENCY     440.0f  // A4 note (can be adjusted)
+
+
+
+const buzzernote nokia[] = {
+    {16, 0, 1, {0, 0}}, {14, 0, 1, {0, 0}}, {9, 0, 1, {0, 0}}, {11, 0, 1, {0, 0}},
+    {13, 0, 1, {0, 0}}, {11, 0, 1, {0, 0}}, {2, 0, 1, {0, 0}}, {3, 0, 1, {0, 0}},
+    {0, 0, 0, {0, 0}} // end marker
+};
+
+static const float note_freqs[18] = {
+    0.0,    // Silence / rest
+    261.63, // C4
+    277.18, // C#4/Db4
+    293.66, // D4
+    311.13, // D#4/Eb4
+    329.63, // E4
+    349.23, // F4
+    369.99, // F#4/Gb4
+    392.00, // G4
+    415.30, // G#4/Ab4
+    440.00, // A4
+    466.16, // A#4/Bb4
+    493.88, // B4
+    523.25, // C5
+    554.37, // C#5
+    587.33, // D5
+    622.25, // D#5
+    659.25  // E5
+};
+
+void buzzer_vInit()
+{
+    HAL_TIM_PWM_Start(&BUZZER_TIMER, BUZZER_CHANNEL);
+    (void)buzzer;
+}
+
+static void buzzer_set_freq(float freq)
+{
+    if (freq == 0) {
+        __HAL_TIM_SET_COMPARE(&BUZZER_TIMER, BUZZER_CHANNEL, 0);
+        return;
+    }
+
+    uint32_t timer_clk = HAL_RCC_GetPCLK1Freq() * 2;
+    uint32_t prescaler = BUZZER_TIMER.Init.Prescaler + 1;
+
+    uint32_t period = (uint32_t)((float)timer_clk / (freq * prescaler));
+    uint32_t pulse = period / 2;
+
+    __HAL_TIM_SET_AUTORELOAD(&BUZZER_TIMER, period);
+    __HAL_TIM_SET_COMPARE(&BUZZER_TIMER, BUZZER_CHANNEL, pulse);
+    BUZZER_TIMER.Instance->CNT = 0;
+}
+
+static void play_note(uint8_t note, uint8_t sharp, uint8_t duration, uint16_t tempo)
+{
+    float freq = 0.0;
+
+    if (note > 0 && note < 18) {
+        freq = note_freqs[note];
+        if (sharp && (note + 1 < 18)) {
+            freq = note_freqs[note + 1];  // use next sharp
+        }
+    }
+
+    buzzer_set_freq(freq);
+
+    uint32_t delay_ms = (60000 / tempo) * duration;
+    HAL_Delay(delay_ms);
+
+    buzzer_set_freq(0);
+    HAL_Delay(10);
+}
+
+buzzer_status_t buzzer_ePlaySong(
+		uint16_t tempo)
+{
+
+        for (uint16_t i = 0; i <   sizeof(nokia) / sizeof(buzzernote); ++i) {
+            if (song[i].duration == 0)
+                break; // End marker
+            play_note(nokia[i].note, nokia[i].sharp, nokia[i].duration, tempo);
+        }
+
+    return BUZZER_OK;
+}

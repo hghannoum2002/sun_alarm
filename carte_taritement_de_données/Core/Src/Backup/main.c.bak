@@ -1,0 +1,806 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2025 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "adc.h"
+#include "can.h"
+#include "dma.h"
+#include "i2c.h"
+#include "usart.h"
+#include "spi.h"
+#include "tim.h"
+#include "tsc.h"
+#include "gpio.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+
+#include "buzzer.h"
+#include "stdio.h"
+#include "stdbool.h"
+#include <stdlib.h>
+#include"fonts.h"
+ #include"ssd1306.h"
+#include "SGP40.h"
+#include "../../Drivers/VL53L1_Nucleo/core/inc/vl53l1_api.h"
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+
+/* USER CODE BEGIN PV */
+
+// Commande au capteur
+uint8_t control_T[2] = {0x80,0x15}; // one-shot + shutdown
+// Adresse de lecture du résultat
+uint8_t Temp_Address = 0x02;
+// Contenu des registres de réponse du capteur
+uint8_t Temp[3];
+// Chaîne tampon pour sprintf()
+char str[10];
+uint8_t sw= 1;
+//int32_t Temperature;
+float fTemperature;
+uint16_t message;
+HAL_StatusTypeDef error_code;
+uint16_t PwmRC[96+50];
+
+volatile uint8_t datasentflag = 0;
+
+uint8_t DevAddress = 0x59; // Adresse SGP40
+uint8_t cmd_test[]={0x28, 0x0E}; // Auto-test
+
+uint8_t cmd_mesure[]={0x26, 0x0F, 0x80 ,0x00, 0xA2, 0x66, 0x66, 0x93};
+
+uint8_t read[3];
+
+uint16_t Sraw_voc;
+uint32_t pot_Value = 0;
+uint32_t ldr_value = 0;
+uint32_t count500 =0;
+uint32_t count100 =0;
+uint32_t count15 =0;
+uint32_t count =0;
+uint32_t count11 =0;
+
+uint32_t count50=0;
+uint8_t once= 1;
+uint8_t once2= 1;
+char str2[10]; // sg oled
+uint16_t running_day= 0;
+uint16_t running_night= 0;
+uint16_t fisrtCall=1;
+HAL_StatusTypeDef error_code2;
+
+#define TOUCH_THRESHOLD 35
+
+uint8_t received_char;
+int buffer_index = 0;
+uint32_t baseline_group1 = 0;
+uint32_t baseline_group4 = 0;
+uint32_t adc_value = 0;
+uint8_t RxData[2];
+CAN_RxHeaderTypeDef RxHeader;
+uint8_t cpt_adc=0;
+typedef struct {
+    int hours;
+    int minutes;
+    int seconds;
+} Time;
+char msg[32];
+Time currentTime = {0, 0, 0};
+Time alarmTime = {20, 20, 20};
+volatile bool timeUpdate= 0;
+uint8_t time_buffer[10];
+
+uint32_t value_group1 = 0;
+uint32_t value_group4 = 0;
+
+VL53L1_Dev_t devLeft;
+VL53L1_Dev_t devRight;
+VL53L1_DEV Dev;
+uint8_t ToFSensor = 0;
+uint16_t step=0;
+VL53L1_RangingMeasurementData_t RangingData;
+uint16_t Dist_Obst_G;
+
+ GPIO_PinState last_state = GPIO_PIN_SET;
+   GPIO_PinState current_state = GPIO_PIN_SET;
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+/* USER CODE BEGIN PFP */
+
+
+extern void update_display(Time t,uint32_t ldr );
+
+extern buzzer_status_t buzzer_ePlaySong( uint16_t tempo);
+extern void buzzer_vStop(void);
+
+
+void progressive_led_on(void);
+void set_leds(uint8_t num_on);
+
+
+void Read_Touch_Group1(void);
+void Read_Touch_Group4(void);
+bool isStableTouch(uint8_t group_idx, uint32_t base, uint32_t threshold);
+
+void display_temp();
+void display_IAQ();
+void poll_PB11(void);
+void ResetAndInitializeTOF1(void );
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
+int main(void)
+{
+
+  /* USER CODE BEGIN 1 */
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* Configure the system clock */
+  SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_DMA_Init();
+  MX_USART2_UART_Init();
+  MX_TIM8_Init();
+  MX_LPUART1_UART_Init();
+  MX_I2C1_Init();
+  MX_TIM6_Init();
+  MX_SPI2_Init();
+  MX_TSC_Init();
+  MX_CAN1_Init();
+  MX_TIM3_Init();
+  MX_ADC1_Init();
+  MX_TIM2_Init();
+  MX_TIM4_Init();
+  /* USER CODE BEGIN 2 */
+  HAL_TSC_Start(&htsc);
+
+
+	 HAL_CAN_Start(&hcan1);
+	 SSD1306_Init();
+
+//callbacks BusCan
+
+
+	 HAL_GPIO_WritePin(CSN_GPIO_Port,CSN_Pin,GPIO_PIN_SET);
+
+
+
+//moteur
+
+	 HAL_GPIO_WritePin(GPIOA, DIR_Pin, GPIO_PIN_RESET);
+	 HAL_GPIO_WritePin(GPIOB, DIS_Pin, GPIO_PIN_SET);
+	 __HAL_TIM_SET_COMPARE(&htim2,TIM_CHANNEL_1, 20000);
+
+	 HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+
+	// Configuration des filtres
+  	CAN_FilterTypeDef sFilterConfig;
+  	sFilterConfig.FilterBank = 0;
+  	sFilterConfig.FilterMode = CAN_FILTERMODE_IDLIST;
+  	sFilterConfig.FilterScale = CAN_FILTERSCALE_16BIT;
+  	sFilterConfig.FilterIdHigh = 0x0220;
+  	sFilterConfig.FilterIdLow = 0x0220;
+  	sFilterConfig.FilterMaskIdHigh = 0x0220;
+  	sFilterConfig.FilterMaskIdLow = 0x0220;
+  	sFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  	sFilterConfig.FilterActivation = ENABLE;
+  	HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig );
+
+  // Envoi de la commande SGP40
+
+	error_code=HAL_I2C_Master_Transmit(&hi2c1,(DevAddress<<1),(uint8_t *)cmd_test, sizeof(cmd_test),HAL_MAX_DELAY);
+	HAL_Delay(320);
+
+  // Lecture de la réponse du SGP40
+
+	error_code=HAL_I2C_Master_Receive(&hi2c1,(DevAddress<<1), (uint8_t *)read, sizeof(read),HAL_MAX_DELAY);
+
+    set_leds(0);
+
+
+     HAL_TIM_Base_Start_IT(&htim6);
+	 HAL_TIM_PWM_Start_IT(&htim4, TIM_CHANNEL_4);
+
+     HAL_CAN_ActivateNotification(&hcan1,CAN_IT_RX_FIFO0_MSG_PENDING );
+	 HAL_CAN_ActivateNotification(&hcan1,CAN_IT_TX_MAILBOX_EMPTY );
+
+
+	 //bluetooth
+	 HAL_UART_Receive_IT(&hlpuart1,time_buffer, 10);
+
+
+	 ResetAndInitializeTOF1();
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+
+	  //condition moteur
+	  if(count50> 50)  {HAL_ADC_Start_IT(&hadc1); count50= 0;}
+
+
+		if( (pot_Value/ 10) <Sraw_voc)
+			  HAL_GPIO_WritePin(GPIOB, DIS_Pin, GPIO_PIN_RESET);
+		else
+			  HAL_GPIO_WritePin(GPIOB, DIS_Pin, GPIO_PIN_SET);
+
+//time
+		if(timeUpdate) {
+
+		char test = time_buffer[0];
+
+		timeUpdate=0;
+
+		if(test=='A'){
+			sscanf(time_buffer, "%*c:%d:%d:%d", &alarmTime.hours, &alarmTime.minutes, &alarmTime.seconds );
+			//buzzer_ePlaySong( 100);
+		}
+		else{
+			sscanf(time_buffer, "%*c:%d:%d:%d", &currentTime.hours, &currentTime.minutes, &currentTime.seconds );
+			update_display(currentTime, ldr_value);
+		}
+		}
+
+//alarme
+	  if((alarmTime.hours==currentTime.hours)  &&(alarmTime.minutes==currentTime.minutes)&&(currentTime.seconds>=alarmTime.seconds)){
+		  buzzer_ePlaySong( 100);
+		running_day=1;
+	  }
+	  progressive_led_on();
+	  poll_PB11();
+//capteur de température
+	 HAL_GPIO_WritePin(CE_GPIO_Port,CE_Pin, GPIO_PIN_SET);
+
+	 error_code=HAL_SPI_Transmit(&hspi2,(uint8_t *)control_T,sizeof(control_T),HAL_MAX_DELAY);
+
+     HAL_GPIO_WritePin(CE_GPIO_Port,CE_Pin,GPIO_PIN_RESET);
+
+//     if(once) {
+//
+//    	 count15= 0;
+//
+//    	 once=0;
+//     }
+
+	if (count15> 15){
+
+		once= 	1;
+		count15= 0;
+
+     HAL_GPIO_WritePin(CE_GPIO_Port,CE_Pin, GPIO_PIN_SET);
+
+
+	 error_code=HAL_SPI_Transmit(&hspi2,&Temp_Address,1,HAL_MAX_DELAY);
+
+
+	 error_code=HAL_SPI_Receive(&hspi2,(uint8_t *)Temp,3,HAL_MAX_DELAY);
+
+
+	 HAL_GPIO_WritePin(CE_GPIO_Port,CE_Pin,GPIO_PIN_RESET);
+	}
+
+	 uint8_t msbvalue = Temp[0];
+	 uint8_t lsbvalue = Temp[1];
+
+
+	 if(lsbvalue && 0b10000000 == 0b10000000)
+		{
+			fTemperature = msbvalue + 0.50;
+		}
+	 else if(lsbvalue && 0b01000000 == 0b01000000)
+		{
+			fTemperature = msbvalue + 0.25;
+		}
+	 else
+		{
+			fTemperature = msbvalue;
+		}
+
+
+//	 if(once2)
+//	 {
+//
+//		 count100 =0;
+//		 once2= 0;
+//	 }
+if(count100 > 100){
+
+	once2= 1;
+	count100 = 0;
+  // Reconstruction de la réponse du SGP40
+     Sraw_voc = SGP40_MeasureVOC(fTemperature, 50);
+
+
+}
+
+
+
+  //  tactile
+         if (isStableTouch(TSC_GROUP1_IDX, 239, TOUCH_THRESHOLD)) {
+          sw++;
+          if(sw==3)  sw=0;
+         }
+  }
+  /* USER CODE END 3 */
+}
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Configure the main internal regulator output voltage
+  */
+  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 1;
+  RCC_OscInitStruct.PLL.PLLN = 10;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
+  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
+  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/* USER CODE BEGIN 4 */
+uint8_t cpt=0;
+
+uint8_t flag_btn=0;
+void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim->Instance == TIM3){
+	HAL_TIM_PWM_Stop_DMA(&htim3, TIM_CHANNEL_4);
+	datasentflag=1;}
+
+	if (htim->Instance == TIM4){
+		 count500 ++; count100 ++; count15 ++;count =1; count11++; count50++;
+
+		 if(count11>= 11 && flag_btn){
+
+
+				if(sw==1) { display_temp(); sw=2;}
+				else if(sw==0) {update_display(currentTime, ldr_value); sw=1;}
+				else {display_IAQ(); sw=0;  }
+				cpt++;
+				count11=0;
+			    flag_btn=0;
+		 }
+	}
+}
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM6) {
+        currentTime.seconds++;
+
+        if (currentTime.seconds >= 60) {
+            currentTime.seconds = 0;
+            currentTime.minutes++;
+            if (currentTime.minutes >= 60) {
+                currentTime.minutes = 0;
+                currentTime.hours++;
+                if (currentTime.hours >= 24) {
+                    currentTime.hours = 0;
+                }
+            }
+        }
+
+        if(sw==1)  update_display(currentTime, ldr_value); else if(sw==2) display_temp(); else display_IAQ();
+    }
+
+
+}
+
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+
+	timeUpdate=1;
+
+	  HAL_UART_Receive_IT(&hlpuart1,time_buffer, 10);
+
+}
+
+
+
+
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+if ( GPIO_Pin == INTOF1_Pin ) {
+VL53L1_GetRangingMeasurementData(&devLeft, &RangingData);
+Dist_Obst_G = RangingData.RangeMilliMeter;
+if ( Dist_Obst_G <= 300)
+buzzer_vStop();
+VL53L1_ClearInterruptAndStartMeasurement(Dev);
+
+}
+
+if ( GPIO_Pin == btn_Pin_Pin ) {
+	count11= 0;
+    flag_btn=1;
+}
+
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+	if(hcan == &hcan1)
+	{
+		HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, RxData);
+
+		// Reconstruction du message, en décimal : 4660
+		message = ((uint16_t)(RxData[0])<<8)|RxData[1];
+	}
+}
+
+
+
+
+
+////// functionssssss
+
+void set_leds(uint8_t num_on) {
+    int k = 0;
+
+    for (int i = 0; i < 4; i++) {
+        uint8_t p = (i < num_on) ? 1 : 0;
+
+        uint8_t green = 0;
+        uint8_t red = 0;
+        uint8_t blue = 0;
+
+        if (p) {
+            if (running_day) {
+                // Blue
+                red = 0;
+                green = 0;
+                blue = 255 * 0.3f;
+            } else {
+                // Red
+                red = 255 * 0.3f  ;
+                green = 0;
+                blue = 0;
+            }
+        }
+
+        // GRB order
+        uint8_t color[3] = {green, red, blue};
+
+        for (int c = 0; c < 3; c++) {
+            for (int b = 7; b >= 0; b--) {
+                PwmRC[k++] = (color[c] >> b) & 0x01 ? 64 : 32;
+            }
+        }
+    }
+
+    // Reset signal
+    for (int i = 0; i < 50; i++) {
+        PwmRC[k++] = 0;
+    }
+
+    datasentflag = 0;
+    HAL_TIM_PWM_Start_DMA(&htim3, TIM_CHANNEL_4, (uint32_t *)PwmRC, k);
+}
+
+
+
+void progressive_led_on(void) {
+
+if(running_day || running_night){
+
+    switch (step) {
+    case 0:
+
+				step = 1;
+				set_leds(1);
+				count500 =0;
+
+                break;
+        case 1:
+            if (count500  > 500) {
+                step = 2;
+                set_leds(2);
+                count500 =0;
+            }
+            break;
+        case 2:
+            if (count500  > 500) {
+                step = 3;
+                set_leds(3);
+                count500 =0;
+            }
+            break;
+        case 3:
+            if (count500  > 500) {
+                step = 4;
+                set_leds(4);
+                count500 =0;
+            }
+            break;
+        case 4:
+            if (count500  > 500) {
+                running_day = 0;
+                running_night =0;
+                step = 0;
+                set_leds(0);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+}
+
+
+void Read_Touch_Group1(void) {
+    // Configurer le groupe 1
+    htsc.Instance = TSC;
+    htsc.Init.ChannelIOs = TSC_GROUP1_IO1 ;
+    htsc.Init.SamplingIOs = TSC_GROUP1_IO4;
+    htsc.Init.ShieldIOs = 0;
+
+
+
+    HAL_TSC_IODischarge(&htsc, ENABLE);
+    HAL_Delay(1); // petite décharge
+
+    HAL_TSC_IODischarge(&htsc, DISABLE);
+    HAL_TSC_Start(&htsc);
+    while (HAL_TSC_GetState(&htsc) != HAL_TSC_STATE_READY);
+    value_group1 = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP1_IDX);
+    HAL_TSC_Stop(&htsc);
+}
+
+
+void Read_Touch_Group4(void) {
+    // Configurer le groupe 4
+    htsc.Instance = TSC;
+    htsc.Init.ChannelIOs = TSC_GROUP4_IO1 | TSC_GROUP4_IO2; // PC6, PC7
+    htsc.Init.SamplingIOs = TSC_GROUP4_IO3; // PC5
+    htsc.Init.ShieldIOs = 0;
+
+
+    HAL_TSC_IODischarge(&htsc, ENABLE);
+    HAL_Delay(1); // petite décharge
+
+    HAL_TSC_IODischarge(&htsc, DISABLE);
+    HAL_TSC_Start(&htsc);
+
+    while (HAL_TSC_GetState(&htsc) != HAL_TSC_STATE_READY);
+    value_group4 = HAL_TSC_GroupGetValue(&htsc, TSC_GROUP4_IDX);
+    HAL_TSC_Stop(&htsc);
+}
+
+bool isStableTouch(uint8_t group_idx, uint32_t base, uint32_t threshold) {
+    int stable_count = 0;
+    for (int i = 0; i < 5; i++) {
+        HAL_TSC_Start(&htsc);
+        while (HAL_TSC_GetState(&htsc) != HAL_TSC_STATE_READY);
+        uint32_t val = HAL_TSC_GroupGetValue(&htsc, group_idx);
+        HAL_TSC_Stop(&htsc);
+
+        if (abs(val-base) >threshold)
+            stable_count++;
+        else
+            stable_count = 0;
+    }
+    return (stable_count >= 3);
+}
+void poll_PB11(void) {
+	if (fisrtCall){ fisrtCall =0;}
+	else{
+	current_state= HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11);
+
+    if (current_state != last_state) {
+        last_state = current_state;
+        if (current_state == GPIO_PIN_RESET) {
+        	running_night =1;
+        }
+    }}
+}
+
+void display_IAQ(){
+
+	char str[10];
+	    SSD1306_Clear();
+
+	    sprintf(str, "VOC:%d", Sraw_voc);
+	    SSD1306_GotoXY(0, 0);
+	    if (ldr_value > 3000)
+	    SSD1306_Puts(str, &Font_11x18, 1);
+	    else SSD1306_Puts(str, &Font_11x18, 0);
+
+
+	    SSD1306_UpdateScreen();
+
+
+}
+void display_temp(){
+
+	sprintf(str,"%.1f C",fTemperature);
+	 SSD1306_Clear();
+	SSD1306_GotoXY (0,30);
+	SSD1306_GotoXY(0, 0);
+if (ldr_value > 3000)
+	SSD1306_Puts (str,&Font_16x26,1);
+else
+	SSD1306_Puts (str,&Font_16x26,0);
+	SSD1306_UpdateScreen();
+
+}
+
+
+	void ResetAndInitializeTOF1(void ){
+	VL53L1_DetectionConfig_t DetectionConfig;
+	uint8_t newI2C = 0x52;
+	/* Reset the 1 ToF sensors on the expansion board */
+	HAL_GPIO_WritePin(GPIOH, SHUT1_Pin, GPIO_PIN_RESET);
+	HAL_Delay(10);
+	/* Bring the sensors out of the reset stage one by one and set the new I2C address */
+	Dev=&devLeft;
+	HAL_GPIO_WritePin(GPIOH, SHUT1_Pin, GPIO_PIN_SET);
+	HAL_Delay(5);
+	Dev->comms_speed_khz = 400;
+	Dev->I2cHandle = &hi2c1;
+	Dev->comms_type = 1;
+	Dev->I2cDevAddr=0x52; /* default ToF sensor I2C address*/
+	newI2C = Dev->I2cDevAddr + 2;
+	VL53L1_SetDeviceAddress(Dev, newI2C);
+	Dev->I2cDevAddr=newI2C;
+	/* Device Initialization and setting */
+	VL53L1_WaitDeviceBooted(Dev);
+	VL53L1_DataInit(Dev);
+	VL53L1_StaticInit(Dev);
+	VL53L1_SetDistanceMode(Dev, VL53L1_DISTANCEMODE_LONG);
+	VL53L1_SetMeasurementTimingBudgetMicroSeconds(Dev, 40000);
+	VL53L1_SetInterMeasurementPeriodMilliSeconds(Dev, 50);
+	memset ( &DetectionConfig,0,sizeof(DetectionConfig));
+	DetectionConfig.DetectionMode = VL53L1_DETECTION_DISTANCE_ONLY;
+	DetectionConfig.IntrNoTarget = 0;
+	DetectionConfig.Distance.CrossMode = VL53L1_THRESHOLD_IN_WINDOW;
+	DetectionConfig.Distance.Low = 20;
+	DetectionConfig.Distance.High = 300;
+	VL53L1_SetThresholdConfig ( Dev, &DetectionConfig);
+	VL53L1_UserRoi_t roiConfig;
+	roiConfig.TopLeftX= 0;
+	roiConfig.TopLeftY= 15;
+	roiConfig.BotRightX= 15;
+	roiConfig.BotRightY= 0;
+	VL53L1_SetUserROI(Dev, &roiConfig);
+	VL53L1_ClearInterruptAndStartMeasurement(Dev);
+}
+	void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+		cpt_adc++;
+		if(cpt_adc==1) {ldr_value = HAL_ADC_GetValue(&hadc1);}
+		else { pot_Value = HAL_ADC_GetValue(&hadc1); cpt_adc=0;}
+
+
+	}
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+
+#ifdef  USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */

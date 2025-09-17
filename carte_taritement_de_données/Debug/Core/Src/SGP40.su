@@ -1,0 +1,4 @@
+../Core/Src/SGP40.c:58:16:CRC8_MAXIM	24	static
+../Core/Src/SGP40.c:73:9:SGP40_Init	24	static
+../Core/Src/SGP40.c:117:10:SGP40_MeasureRaw	32	static
+../Core/Src/SGP40.c:144:10:SGP40_MeasureVOC	24	static
